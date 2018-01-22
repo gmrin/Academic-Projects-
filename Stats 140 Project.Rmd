@@ -1,0 +1,255 @@
+---
+title: "Stats140SL Project"
+author: "Mrinalini Garg"
+date: "11/27/2017"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(stringr)
+library(rvest)
+library( data.table)
+library(corrplot)
+library(lubridate)
+library(ggplot2)
+```
+
+
+##Reading in all data sets  and exploratory data analysis 
+```{r, eval=F}
+
+cal<- read.csv("calendar.csv.gz") #Detailed Calendar Data for listings in Los Angeles
+
+head(cal)
+dim(cal)
+names(cal)
+str(cal)
+cal$date<- ymd(cal$date)
+summary(cal)
+
+listing<- read.csv("listings.csv.gz") # Detailed listing data
+head(listing$price)
+dim(listing)
+names(listing)
+str(listing$price)
+length(unique(listing$neighbourhood)) ## Only 160 neighbourhoods have data-- somehow differently named neighbourhoods 
+
+listing$price<- str_replace( listing$price, "\\$", "")
+listing$price<- as.numeric(str_replace( listing$price, ",", ""))
+
+listing %>%  group_by(neighbourhood) %>%  summarize(revs= sum(number_of_reviews), avgrating= mean(review_scores_rating, na.rm=T), avg_price= mean(price, na.rm=T), count= n()) %>%  arrange(desc(revs)) # Now join with nbr and income table
+
+
+
+listsum<- read.csv("listings.csv" )#Summary information and metrics for listings in Los Angeles 
+dim(listsum)
+names(listsum)
+str(listsum)
+length(unique(listsum$neighbourhood))
+listsum %>%  group_by(neighbourhood) %>%  summarize(revs= sum(number_of_reviews)/n(), avg_price= mean(price, na.rm=T), count= n()) %>%  arrange(desc(revs))-> nbr_prc
+summary(listsum[, c(6, 9, 10, 11, 12, 14,15, 16)])
+
+
+# When did each listing get a review -- so dates for each listing 
+review<- read.csv("reviews.csv")#Summary Review data and Listing ID (to facilitate time based analytics and visualisations linked to a listing).
+str(review)
+length(unique(review$listing_id))
+dim(review)
+review %>% group_by(listing_id) %>% summarise(revcount= n())
+
+
+# Just a list of neighbourhoods
+nbr<- read.csv("neighbourhoods.csv") #Neighbourhood list for geo filter. Sourced from city or open source GIS files
+dim(nbr)
+str(nbr)
+
+```
+ 
+ 
+## Scraping income data from la times 
+
+```{r}
+library(stringr)
+library( rvest)
+# Store web url
+nbrincome <- read_html("http://maps.latimes.com/neighborhoods/income/median/neighborhood/list/")
+
+#Scrape the website
+nbr <- nbrincome %>% 
+    html_nodes("#sortable_table a") %>%
+    html_text() 
+length(nbr)
+
+inc<- nbrincome %>%  html_nodes("td:nth-child(3)") %>% html_text() 
+
+nbr_inc<- as.data.frame( cbind( nbr, inc))
+nbr_inc$inc %>% str_replace("\\$", "") %>% str_replace(",", "") %>%  as.numeric() -> nbr_inc$inc
+head(nbr_inc)
+str(nbr_inc)
+
+```
+
+# Data analysis
+
+```{r}
+setdiff( nbr_inc$nbr, listsum$neighbourhood)
+#Data.tabe package: 
+nbr_inc<- data.table( nbr_inc)
+nbr_prc<- data.table( nbr_prc)
+
+# joininh the 2 tables:
+colnames(nbr_prc)[1]<- "nbr"
+setkey(nbr_prc ,  nbr)
+setkey(nbr_inc , nbr)
+
+# perform the join using the merge function
+Result <- merge(nbr_prc,nbr_inc, all.x=TRUE, by= "nbr")
+head(Result)
+str(Result)
+Result<-Result[!(is.na( Result$inc)),]
+summary(Result)
+
+# Generating corrpolot 
+M <- cor(Result[, c(2:4)])
+corrplot.mixed(M, bg= "blue", upper= "square", )
+M
+View(Result)
+
+plot( revs~ I(avg_price^2), data= Result[Result$avg_price<4000,])
+
+md<- lm(revs~avg_price, data= Result)
+plot(md)
+summary(md)
+
+hist(Result[Result$revs<10000]$revs)
+hist(Result$revs)
+sum(Result$revs==1)
+
+md<- lm(revs~inc, data= Result)
+plot(md)
+summary(md)
+plot(revs~inc, data= Result[Result$revs<1000])
+sum(Result$revs==0)
+sum(Result$count==0)
+summary(lm( Result[Result$avg_price< 400]$inc~Result[Result$avg_price< 400]$avg_price))
+
+
+md2<- lm(Result$inc~ log(Result$avg_price))
+summary(md2)
+
+hist(Result[Result$avg_price<500]$avg_price)
+
+hist(Result$inc)
+
+
+
+```
+
+
+```{r}
+
+plot(Result$avg_price ,Result$revs)
+plot(Result$inc ,Result$revs)
+plot(Result$count ,Result$revs)
+plot(Result$avg_price ,Result$inc)
+
+
+# Basic summary stats
+
+# Linear relationships:
+md<- lm(revs~(avg_price), data= Result)
+plot(md)
+summary(md)
+
+
+## Behaviour accross different price bands and income ranges is very different and needs to be further segmented 
+
+# Divding data by 3 income regions 
+
+quantile( Result$inc, c(.33, .67, 1))
+
+low<- Result[Result$inc<53312,]
+name<- rep("low", nrow(low))
+low<- cbind(low, name)
+mid<- Result[Result$inc>53312 & Result$inc< 71998 ,]
+name<- rep("mid", nrow(mid))
+mid<- cbind(mid, name)
+high<- Result[Result$inc>71999,]
+name<- rep("high", nrow(high))
+high<- cbind(high, name)
+
+summary( low)
+summary(high)
+summary(mid)
+
+dat<- rbind(low, mid, high)
+dat$name<- as.factor(dat$name)
+names(dat)[6]<- "Income"
+dim(dat)
+str(dat)
+
+# And plotting 
+ggplot(dat, aes(x=revs, colour= Income)) + geom_density(alpha= 0.2)
+#Could do some non-parametric tests 
+ggplot(dat, aes(x=avg_price, colour= Income)) + geom_density(alpha= 0.2)
+
+
+
+plot(low$avg_price ,low$revs)
+plot(low$inc ,low$revs)
+plot(low$count ,low$revs)
+plot(low$avg_price ,low$inc)
+
+
+#Dividing data by price:
+
+quantile( Result$avg_price, c(.33, .67, 1))
+
+low<- Result[Result$avg_price<96.6,]
+Range<- rep("low", nrow(low))
+low<- cbind(low, Range)
+mid<- Result[Result$avg_price>96.6 & Result$avg_price< 146.280 ,]
+Range<- rep("mid", nrow(mid))
+mid<- cbind(mid, Range)
+high<- Result[Result$avg_price>146.3,]
+Range<- rep("high", nrow(high))
+high<- cbind(high, Range)
+
+summary( low)
+summary(high)
+summary(mid)
+
+dat1<- rbind(low, mid, high)
+dat1$Range<- as.factor(dat1$Range)
+dim(dat1)
+str(dat1)
+
+# And plotting 
+ggplot(dat1, aes(x=revs, colour= Range)) + geom_density(alpha= 0.2)
+#Could do some non-parametric tests 
+
+ggplot(dat1, aes(x=inc, colour= Range)) + geom_density(alpha= 0.2)
+
+
+ggplot(high, aes(x=inc)) + geom_density()
+
+```
+
+
+## Possible questions: 
+How much are people willing to pay for each neighbourhood? or how is the price compared to the number of reviews and for each neighbourhood
+
+are lower income neighbourhoods priced cheaper? 
+How many reviews do they get? 
+Are their reviews higher?
+WHat kind of amenities do they offer 
+
+
+Essentially do two linear regressions and assume the following- 
+ 1) NBR Income as x and number of reviews as Y ( so if correlated then good thing)
+ 2) Pricing as x and number of reviews as Y ( if correlated)
+ 3) Is there any correlation/ interaction between the 2 factores 
+ 4) How do they interact 
+ OR 
+ 5) What amenities are people willing to lose out on for price changes- select essential amenities/ aggregate the different kinds

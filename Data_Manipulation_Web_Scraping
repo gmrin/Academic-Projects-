@@ -1,18 +1,9 @@
 ---
 title: "Stats 102A - Homework 3"
-author: "Put Your Name Here"
+author: "Mrinalini"
 date: "Fall 2017"
 output: html_document
 ---
-
-Modify this file with your answers and responses.
-
-### Reading:
-
-a. Introduction to dplyr vignette: https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html
-b. How dplyr replaced my most common R idioms: http://www.onthelambda.com/2014/02/10/how-dplyr-replaced-my-most-common-r-idioms/
-c. regular expressions tutorial http://regexone.com/
-d. Advanced R chapter 7: OO Field guide
 
 ## 1. __Object Oriented Programming for tic-tac-toe__
 
